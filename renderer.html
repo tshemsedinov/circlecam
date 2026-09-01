@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CircleCam</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+
+      #circle {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        overflow: hidden;
+        background: rgba(15, 15, 15, 0.95);
+        app-region: drag;
+        -webkit-app-region: drag;
+      }
+
+      video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        pointer-events: none;
+        background: black;
+        {{mirrorCss}}
+      }
+
+      #status {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 24px;
+        text-align: center;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.35;
+        color: white;
+        background: rgba(0, 0, 0, 0.58);
+        pointer-events: none;
+      }
+
+      #status.hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="circle">
+      <video id="video" autoplay muted playsinline></video>
+      <div id="status">Opening camera…</div>
+    </div>
+
+    <script>
+      'use strict';
+
+      const CONFIG = {{json}};
+      const video = document.getElementById('video');
+      const status = document.getElementById('status');
+      let activeStream = null;
+
+      const asText = (value) => {
+        if (value === undefined || value === null) return '';
+        if (typeof value === 'string') return value;
+        return '' + value;
+      };
+
+      const showStatus = (text) => {
+        status.textContent = text;
+        status.classList.remove('hidden');
+      };
+
+      const hideStatus = () => {
+        status.classList.add('hidden');
+      };
+
+      const stopStream = (stream) => {
+        if (stream === null) return;
+        for (const track of stream.getTracks()) track.stop();
+      };
+
+      const normalizeName = (value) => {
+        const text = asText(value).toLowerCase();
+        const spaced = text.replace(/[_:/]+/g, ' ');
+        return spaced.replace(/\s+/g, ' ').trim();
+      };
+
+      const nameScore = (label, target) => {
+        const tokens = (value) =>
+          normalizeName(value)
+            .split(' ')
+            .filter((token) => token !== '');
+        const a = tokens(label);
+        const b = tokens(target);
+        if (a.length === 0 || b.length === 0) return 0;
+        let hits = 0;
+        for (const token of a) {
+          if (b.includes(token)) hits += 1;
+        }
+        return hits;
+      };
+
+      const pickCamera = (cameras, preferred) => {
+        if (cameras.length === 0) return null;
+        if (preferred === null || preferred === undefined) return cameras[0];
+        const exactId = cameras.find((d) => d.deviceId === preferred.deviceId);
+        if (exactId !== undefined) return exactId;
+        let best = null;
+        let bestHits = 0;
+        for (const camera of cameras) {
+          const hits = nameScore(camera.label, preferred.name);
+          if (hits > bestHits) {
+            best = camera;
+            bestHits = hits;
+          }
+        }
+        if (bestHits > 0) return best;
+        return cameras[0];
+      };
+
+      const openCamera = async (device, preferred) => {
+        const width = preferred?.width || 1920;
+        const height = preferred?.height || 1080;
+        const fps = preferred?.fps > 0 ? preferred.fps : 30;
+        const constraints = {
+          deviceId: device ? { exact: device.deviceId } : undefined,
+          width: { ideal: width },
+          height: { ideal: height },
+          frameRate: { ideal: fps },
+        };
+        if (preferred?.fps >= CONFIG.minFps) {
+          constraints.frameRate.min = CONFIG.minFps;
+        }
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: constraints,
+          });
+        } catch {
+          let videoOpt = true;
+          if (device) videoOpt = { deviceId: { exact: device.deviceId } };
+          return navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: videoOpt,
+          });
+        }
+      };
+
+      const start = async () => {
+        try {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('getUserMedia is not available');
+          }
+          showStatus('Requesting camera access…');
+          const permissionStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+          stopStream(permissionStream);
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const cameras = devices.filter((d) => d.kind === 'videoinput');
+          if (cameras.length === 0) {
+            throw new Error('No video-input cameras found');
+          }
+          console.log('Cameras:');
+          for (let index = 0; index < cameras.length; index += 1) {
+            const camera = cameras[index];
+            let label = camera.label;
+            if (label === undefined || label === '') label = camera.deviceId;
+            console.log('  [' + index + '] ' + label);
+          }
+          const device = pickCamera(cameras, CONFIG.preferred);
+          const opening = device?.label || 'camera';
+          showStatus('Opening ' + opening + '…');
+          activeStream = await openCamera(device, CONFIG.preferred);
+          const track = activeStream.getVideoTracks()[0];
+          if (track && CONFIG.preferred) {
+            try {
+              const pref = CONFIG.preferred;
+              const idealFps = pref.fps > 0 ? pref.fps : 30;
+              await track.applyConstraints({
+                width: { ideal: pref.width },
+                height: { ideal: pref.height },
+                frameRate: { ideal: idealFps },
+              });
+            } catch {
+              // ignore
+            }
+            const actual = track.getSettings();
+            const pref = CONFIG.preferred;
+            const title = device?.label || track.label;
+            const aw = actual.width || pref.width;
+            const ah = actual.height || pref.height;
+            const rate = actual.frameRate || pref.fps || 0;
+            const fps = rate.toFixed(1);
+            const summary = title + ' | ' + aw + 'x' + ah + ' @ ' + fps;
+            console.log('Selected: ' + summary + ' FPS');
+          }
+          video.srcObject = activeStream;
+          await video.play();
+          hideStatus();
+        } catch (error) {
+          console.error(error);
+          const message = error && error.message ? error.message : error + '';
+          showStatus('Camera error:\n' + message);
+        }
+      };
+
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') window.close();
+      });
+
+      window.addEventListener('beforeunload', () => {
+        stopStream(activeStream);
+        activeStream = null;
+      });
+
+      start();
+    </script>
+  </body>
+</html>

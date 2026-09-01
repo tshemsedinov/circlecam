@@ -1,0 +1,10 @@
+{
+  "camera": "auto",
+  "position": "top-right",
+  "size": 430,
+  "margin": 15,
+  "monitor": 0,
+  "minFps": 30,
+  "mirror": false,
+  "nativeWayland": false
+}
