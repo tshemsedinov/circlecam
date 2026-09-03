@@ -256,9 +256,9 @@ const fallbackModes = (device) => {
   const fps = 30;
   for (const fourcc of FALLBACK_FORMATS) {
     for (const resolution of FALLBACK_RESOLUTIONS) {
-      const width = resolution.width;
-      const height = resolution.height;
-      result.push({ device, name, fourcc, width, height, fps });
+      const { width, height } = resolution;
+      const mode = { device, name, fourcc, width, height, fps };
+      result.push(mode);
     }
   }
   return result;
@@ -373,22 +373,20 @@ const spawnElectronGui = (nativeWayland) => {
     console.error('Could not locate the Electron binary.');
     process.exit(1);
   }
-  const flags = `
-    --enable-transparent-visuals
-    --use-gl=angle
-    --use-angle=swiftshader
-  `;
-  const electronArgs = commandArgs(flags);
+  const flags = [
+    '--enable-transparent-visuals',
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+  ];
   if (shouldForceX11(nativeWayland)) {
-    electronArgs.push('--ozone-platform=x11');
+    flags.push('--ozone-platform=x11');
   }
-  const childArgs = [...electronArgs, __filename];
+  flags.push(__filename);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const result = spawnSync(electronPath, childArgs, {
-    stdio: 'inherit',
-    env,
-  });
+  const stdio = 'inherit';
+  const options = { stdio, env };
+  const result = spawnSync(electronPath, flags, options);
   if (result.error !== undefined) {
     console.error(result.error.message);
     process.exit(1);
@@ -457,10 +455,7 @@ const configureMediaPermissions = () => {
   );
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
-      if (permission !== 'media') {
-        callback(false);
-        return;
-      }
+      if (permission !== 'media') return void callback(false);
       const types = details?.mediaTypes;
       const mediaTypes = types === undefined ? [] : types;
       const allow = mediaTypes.length === 0 || mediaTypes.includes('video');
