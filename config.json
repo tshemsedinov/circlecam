@@ -1,7 +1,11 @@
 {
   "camera": "auto",
   "position": "top-right",
-  "size": 430,
+  "shape": "circle",
+  "width": 800,
+  "height": 800,
+  "radius": 0,
+  "comments": "240, 480",
   "margin": 15,
   "monitor": 0,
   "minFps": 60,

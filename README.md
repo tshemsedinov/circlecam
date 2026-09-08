@@ -18,7 +18,11 @@ Settings are in `config.json` next to `circlecam.js`.
   or name substring (default: `auto`)
 - `position` — `top-right`, `top-left`, `bottom-right`,
   `bottom-left`, `center` (default: `top-right`)
-- `size` — circle diameter in pixels (default: `430`)
+- `shape` — `circle` or `rectangle` (default: `circle`)
+- `width` — window width in pixels (default: `430`)
+- `height` — window height in pixels (default: `430`)
+- `radius` — rectangle corner radius in pixels; `0` is a strict
+  rectangle. Unused for `circle` (default: `0`)
 - `margin` — screen-border margin in pixels (default: `15`)
 - `monitor` — monitor index; primary is `0` (default: `0`)
 - `minFps` — prefer max resolution at >= this FPS (default: `30`)
@@ -30,7 +34,10 @@ Settings are in `config.json` next to `circlecam.js`.
 {
   "camera": "Logitech",
   "position": "bottom-right",
-  "size": 240,
+  "shape": "rectangle",
+  "width": 320,
+  "height": 240,
+  "radius": 24,
   "margin": 15,
   "monitor": 1,
   "minFps": 30,
@@ -51,7 +58,7 @@ instead.
 Linux waits briefly after Electron is ready so the first transparent
 frameless window gets an ARGB visual.
 
-The overlay stays on top. Drag anywhere on the circle. Close with Alt+F4
+The overlay stays on top. Drag anywhere on the window. Close with Alt+F4
 or Escape.
 
 ## License

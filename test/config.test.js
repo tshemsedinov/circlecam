@@ -28,7 +28,10 @@ test('loadConfig fills documented defaults', () => {
     assert.equal(config.constructor.name, 'Config');
     assert.equal(config.camera, 'auto');
     assert.equal(config.position, 'top-right');
-    assert.equal(config.size, 430);
+    assert.equal(config.shape, 'circle');
+    assert.equal(config.width, 430);
+    assert.equal(config.height, 430);
+    assert.equal(config.radius, 0);
     assert.equal(config.margin, 15);
     assert.equal(config.monitor, 0);
     assert.equal(config.minFps, 30);
@@ -43,14 +46,18 @@ test('loadConfig fills documented defaults', () => {
 test('loadConfig keeps known fields and drops extras', () => {
   const { dir, filePath } = writeConfig({
     camera: 'Logitech',
-    size: 800,
+    width: 800,
+    shape: 'rectangle',
+    radius: 24,
     comments: '240, 480',
   });
   try {
     const loaded = loadConfig(filePath);
     assert.equal(loaded.ok, true);
     assert.equal(loaded.value.camera, 'Logitech');
-    assert.equal(loaded.value.size, 800);
+    assert.equal(loaded.value.width, 800);
+    assert.equal(loaded.value.shape, 'rectangle');
+    assert.equal(loaded.value.radius, 24);
     assert.equal(Object.hasOwn(loaded.value, 'comments'), false);
     assert.equal(Config.fields.includes('comments'), false);
   } finally {
@@ -72,7 +79,7 @@ test('loadConfig fails on invalid JSON', () => {
 });
 
 test('loadConfig fails on a wrong field type', () => {
-  const { dir, filePath } = writeConfig({ size: '800' });
+  const { dir, filePath } = writeConfig({ width: '800' });
   try {
     const loaded = loadConfig(filePath);
     assert.equal(loaded.ok, false);

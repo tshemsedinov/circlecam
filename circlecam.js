@@ -8,7 +8,8 @@ const { spawnSync } = require('node:child_process');
 const { Result } = require('metautil');
 
 const { loadConfig } = require('./lib/config.js');
-const { applyTemplate, calculatePosition } = require('./lib/layout.js');
+const layout = require('./lib/layout.js');
+const { applyTemplate, calculatePosition, shapeRadius } = layout;
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const RENDERER_PATH = path.join(__dirname, 'renderer.html');
@@ -164,8 +165,7 @@ const logSession = (displays) => {
 
 const buildWindow = (pos) => {
   const { x, y } = pos;
-  const { size: width } = config;
-  const height = width;
+  const { width, height } = config;
   const webPreferences = {
     nodeIntegration: false,
     contextIsolation: true,
@@ -248,8 +248,8 @@ class Overlay {
     const displays = orderedDisplays();
     const display = pickDisplay(displays);
     logSession(displays);
-    const { size, margin, position } = config;
-    const pos = calculatePosition(display, size, margin, position);
+    const pos = calculatePosition(display, config);
+    const { position } = config;
     console.log(`Requested position: ${position} (${pos.x}, ${pos.y})`);
     this.win = buildWindow(pos);
     this.bindWindow();
@@ -278,7 +278,8 @@ class Overlay {
     const json = JSON.stringify(payload).replaceAll('<', '\\u003c');
     const mirrored = config.mirror === true;
     const mirrorCss = mirrored ? 'transform: scaleX(-1);' : '';
-    const html = applyTemplate(RENDERER_HTML, { json, mirrorCss });
+    const radiusCss = shapeRadius(config.shape, config.radius);
+    const html = applyTemplate(RENDERER_HTML, { json, mirrorCss, radiusCss });
     const written = Result.from(() => {
       fs.writeFileSync(rendererFile, html, 'utf8');
     });
@@ -323,8 +324,7 @@ class Overlay {
     if (target === null || target === undefined) return;
     if (target.isDestroyed()) return;
     const { x, y } = pos;
-    const { size: width } = config;
-    const height = width;
+    const { width, height } = config;
     target.setBounds({ x, y, width, height });
     target.setAlwaysOnTop(true);
   }
