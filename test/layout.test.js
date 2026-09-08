@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const layout = require('../lib/layout.js');
 const { applyTemplate, calculatePosition, shapeRadius } = layout;
+const { clampOpacity } = layout;
 
 const display = {
   bounds: { x: 100, y: 200, width: 1920, height: 1080 },
@@ -34,6 +35,14 @@ test('calculatePosition uses width and height independently', () => {
     position: 'bottom-right',
   });
   assert.deepEqual(pos, { x: 1605, y: 1065 });
+});
+
+test('clampOpacity keeps values in the unit interval', () => {
+  assert.equal(clampOpacity(0.7), 0.7);
+  assert.equal(clampOpacity(0), 0);
+  assert.equal(clampOpacity(1), 1);
+  assert.equal(clampOpacity(-0.2), 0);
+  assert.equal(clampOpacity(1.4), 1);
 });
 
 test('shapeRadius maps circle and rectangle', () => {

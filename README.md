@@ -23,6 +23,7 @@ Settings are in `config.json` next to `circlecam.js`.
 - `height` — window height in pixels (default: `430`)
 - `radius` — rectangle corner radius in pixels; `0` is a strict
   rectangle. Unused for `circle` (default: `0`)
+- `opacity` — overlay opacity from `0` to `1` (default: `1`)
 - `margin` — screen-border margin in pixels (default: `15`)
 - `monitor` — monitor index; primary is `0` (default: `0`)
 - `minFps` — prefer max resolution at >= this FPS (default: `30`)

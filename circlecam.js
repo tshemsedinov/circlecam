@@ -10,6 +10,7 @@ const { Result } = require('metautil');
 const { loadConfig } = require('./lib/config.js');
 const layout = require('./lib/layout.js');
 const { applyTemplate, calculatePosition, shapeRadius } = layout;
+const { clampOpacity } = layout;
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const RENDERER_PATH = path.join(__dirname, 'renderer.html');
@@ -279,7 +280,13 @@ class Overlay {
     const mirrored = config.mirror === true;
     const mirrorCss = mirrored ? 'transform: scaleX(-1);' : '';
     const radiusCss = shapeRadius(config.shape, config.radius);
-    const html = applyTemplate(RENDERER_HTML, { json, mirrorCss, radiusCss });
+    const opacityCss = clampOpacity(config.opacity);
+    const html = applyTemplate(RENDERER_HTML, {
+      json,
+      mirrorCss,
+      radiusCss,
+      opacityCss,
+    });
     const written = Result.from(() => {
       fs.writeFileSync(rendererFile, html, 'utf8');
     });

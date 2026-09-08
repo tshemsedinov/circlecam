@@ -1,10 +1,11 @@
 {
   "camera": "auto",
   "position": "top-right",
-  "shape": "circle",
+  "shape": "rectangle",
   "width": 800,
   "height": 800,
-  "radius": 0,
+  "radius": 50,
+  "opacity": 1,
   "comments": "240, 480",
   "margin": 15,
   "monitor": 0,
