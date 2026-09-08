@@ -77,7 +77,7 @@
       const asText = (value) => {
         if (value === undefined || value === null) return '';
         if (typeof value === 'string') return value;
-        return '' + value;
+        return `${value}`;
       };
 
       const showStatus = (text) => {
@@ -100,13 +100,14 @@
         return spaced.replace(/\s+/g, ' ').trim();
       };
 
+      const tokensOf = (value) => {
+        const parts = normalizeName(value).split(' ');
+        return parts.filter((token) => token !== '');
+      };
+
       const nameScore = (label, target) => {
-        const tokens = (value) =>
-          normalizeName(value)
-            .split(' ')
-            .filter((token) => token !== '');
-        const a = tokens(label);
-        const b = tokens(target);
+        const a = tokensOf(label);
+        const b = tokensOf(target);
         if (a.length === 0 || b.length === 0) return 0;
         let hits = 0;
         for (const token of a) {
@@ -134,16 +135,18 @@
       };
 
       const openCamera = async (device, preferred) => {
-        const width = preferred?.width || 1920;
-        const height = preferred?.height || 1080;
-        const fps = preferred?.fps > 0 ? preferred.fps : 30;
+        const pref = preferred ?? {};
+        const width = pref.width ?? 1920;
+        const height = pref.height ?? 1080;
+        const fps = pref.fps > 0 ? pref.fps : 30;
+        const deviceId = device ? { exact: device.deviceId } : undefined;
         const constraints = {
-          deviceId: device ? { exact: device.deviceId } : undefined,
+          deviceId,
           width: { ideal: width },
           height: { ideal: height },
           frameRate: { ideal: fps },
         };
-        if (preferred?.fps >= CONFIG.minFps) {
+        if (pref.fps >= CONFIG.minFps) {
           constraints.frameRate.min = CONFIG.minFps;
         }
         try {
@@ -151,14 +154,50 @@
             audio: false,
             video: constraints,
           });
-        } catch {
+        } catch (error) {
+          console.error(error);
           let videoOpt = true;
           if (device) videoOpt = { deviceId: { exact: device.deviceId } };
-          return navigator.mediaDevices.getUserMedia({
+          return await navigator.mediaDevices.getUserMedia({
             audio: false,
             video: videoOpt,
           });
         }
+      };
+
+      const logCameras = (cameras) => {
+        console.log('Cameras:');
+        for (let index = 0; index < cameras.length; index += 1) {
+          const camera = cameras[index];
+          let label = camera.label;
+          if (label === undefined || label === '') label = camera.deviceId;
+          console.log(`  [${index}] ${label}`);
+        }
+      };
+
+      const applyPreferred = async (track, preferred) => {
+        const idealFps = preferred.fps > 0 ? preferred.fps : 30;
+        try {
+          await track.applyConstraints({
+            width: { ideal: preferred.width },
+            height: { ideal: preferred.height },
+            frameRate: { ideal: idealFps },
+          });
+        } catch (error) {
+          // optional; the opened stream still works
+          console.error(error);
+        }
+      };
+
+      const logSelected = (device, track, preferred) => {
+        const actual = track.getSettings();
+        const title = device?.label || track.label;
+        const aw = actual.width ?? preferred.width;
+        const ah = actual.height ?? preferred.height;
+        const rate = actual.frameRate ?? preferred.fps ?? 0;
+        const fps = rate.toFixed(1);
+        const summary = `${title} | ${aw}x${ah} @ ${fps}`;
+        console.log(`Selected: ${summary} FPS`);
       };
 
       const start = async () => {
@@ -177,47 +216,24 @@
           if (cameras.length === 0) {
             throw new Error('No video-input cameras found');
           }
-          console.log('Cameras:');
-          for (let index = 0; index < cameras.length; index += 1) {
-            const camera = cameras[index];
-            let label = camera.label;
-            if (label === undefined || label === '') label = camera.deviceId;
-            console.log('  [' + index + '] ' + label);
-          }
+          logCameras(cameras);
           const device = pickCamera(cameras, CONFIG.preferred);
           const opening = device?.label || 'camera';
-          showStatus('Opening ' + opening + '…');
+          showStatus(`Opening ${opening}…`);
           activeStream = await openCamera(device, CONFIG.preferred);
           const track = activeStream.getVideoTracks()[0];
-          if (track && CONFIG.preferred) {
-            try {
-              const pref = CONFIG.preferred;
-              const idealFps = pref.fps > 0 ? pref.fps : 30;
-              await track.applyConstraints({
-                width: { ideal: pref.width },
-                height: { ideal: pref.height },
-                frameRate: { ideal: idealFps },
-              });
-            } catch {
-              // ignore
-            }
-            const actual = track.getSettings();
-            const pref = CONFIG.preferred;
-            const title = device?.label || track.label;
-            const aw = actual.width || pref.width;
-            const ah = actual.height || pref.height;
-            const rate = actual.frameRate || pref.fps || 0;
-            const fps = rate.toFixed(1);
-            const summary = title + ' | ' + aw + 'x' + ah + ' @ ' + fps;
-            console.log('Selected: ' + summary + ' FPS');
+          const preferred = CONFIG.preferred;
+          if (track && preferred) {
+            await applyPreferred(track, preferred);
+            logSelected(device, track, preferred);
           }
           video.srcObject = activeStream;
           await video.play();
           hideStatus();
         } catch (error) {
           console.error(error);
-          const message = error && error.message ? error.message : error + '';
-          showStatus('Camera error:\n' + message);
+          const message = asText(error.message) || asText(error);
+          showStatus(`Camera error:\n${message}`);
         }
       };
 

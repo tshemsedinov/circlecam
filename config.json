@@ -4,7 +4,7 @@
   "size": 430,
   "margin": 15,
   "monitor": 0,
-  "minFps": 30,
+  "minFps": 60,
   "mirror": false,
   "nativeWayland": false
 }
