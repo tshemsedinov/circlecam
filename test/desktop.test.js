@@ -16,18 +16,20 @@ const {
   installDesktop,
 } = require('../lib/desktop.js');
 
-const writeTempRoot = () => {
+const makeTempDir = (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'circlecam-desktop-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+};
+
+const writeTempRoot = (t) => {
+  const dir = makeTempDir(t);
   const root = path.join(dir, 'app');
   const dataHome = path.join(dir, 'share');
   const iconSource = path.join(root, 'icon.svg');
   fs.mkdirSync(root);
   fs.writeFileSync(iconSource, '<svg xmlns="http://www.w3.org/2000/svg"/>');
-  return { dir, root, dataHome, iconSource };
-};
-
-const removeDir = (dir) => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  return { root, dataHome, iconSource };
 };
 
 test('quoteArg leaves safe paths unquoted', () => {
@@ -75,50 +77,42 @@ test('buildDesktopEntry writes required keys', () => {
   assert.equal(text.endsWith('\n'), true);
 });
 
-test('installDesktop writes launcher and copies icon', () => {
-  const { dir, root, dataHome, iconSource } = writeTempRoot();
-  try {
-    const installed = installDesktop({
-      dataHome,
-      root,
-      nodePath: '/opt/node/bin/node',
-      iconSource,
-    });
-    assert.equal(installed.ok, true);
-    const { desktopPath, iconPath } = installed.value;
-    const expectedDesktop = path.join(dataHome, 'applications', DESKTOP_FILE);
-    const expectedIcon = path.join(
-      dataHome,
-      'icons',
-      'hicolor',
-      'scalable',
-      'apps',
-      ICON_FILE,
-    );
-    assert.equal(desktopPath, expectedDesktop);
-    assert.equal(iconPath, expectedIcon);
-    const text = fs.readFileSync(desktopPath, 'utf8');
-    assert.equal(text.includes('Exec=/opt/node/bin/node '), true);
-    assert.equal(text.includes(path.join(root, 'circlecam.js')), true);
-    assert.equal(text.includes(`Path=${root}`), true);
-    assert.equal(text.includes(`Icon=${iconPath}`), true);
-    assert.equal(fs.existsSync(iconPath), true);
-  } finally {
-    removeDir(dir);
-  }
+test('installDesktop writes launcher and copies icon', (t) => {
+  const { root, dataHome, iconSource } = writeTempRoot(t);
+  const installed = installDesktop({
+    dataHome,
+    root,
+    nodePath: '/opt/node/bin/node',
+    iconSource,
+  });
+  assert.equal(installed.ok, true);
+  const { desktopPath, iconPath } = installed.value;
+  const expectedDesktop = path.join(dataHome, 'applications', DESKTOP_FILE);
+  const expectedIcon = path.join(
+    dataHome,
+    'icons',
+    'hicolor',
+    'scalable',
+    'apps',
+    ICON_FILE,
+  );
+  assert.equal(desktopPath, expectedDesktop);
+  assert.equal(iconPath, expectedIcon);
+  const text = fs.readFileSync(desktopPath, 'utf8');
+  assert.equal(text.includes('Exec=/opt/node/bin/node '), true);
+  assert.equal(text.includes(path.join(root, 'circlecam.js')), true);
+  assert.equal(text.includes(`Path=${root}`), true);
+  assert.equal(text.includes(`Icon=${iconPath}`), true);
+  assert.equal(fs.existsSync(iconPath), true);
 });
 
-test('installDesktop fails when the icon is missing', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'circlecam-desktop-'));
-  try {
-    const installed = installDesktop({
-      dataHome: path.join(dir, 'share'),
-      root: dir,
-      nodePath: '/opt/node/bin/node',
-      iconSource: path.join(dir, 'missing.svg'),
-    });
-    assert.equal(installed.ok, false);
-  } finally {
-    removeDir(dir);
-  }
+test('installDesktop fails when the icon is missing', (t) => {
+  const dir = makeTempDir(t);
+  const installed = installDesktop({
+    dataHome: path.join(dir, 'share'),
+    root: dir,
+    nodePath: '/opt/node/bin/node',
+    iconSource: path.join(dir, 'missing.svg'),
+  });
+  assert.equal(installed.ok, false);
 });

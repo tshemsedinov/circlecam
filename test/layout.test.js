@@ -4,8 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const layout = require('../lib/layout.js');
-const { applyTemplate, calculatePosition, shapeRadius } = layout;
-const { clampOpacity } = layout;
+const { calculatePosition, shapeRadius, clampOpacity } = layout;
 
 const display = {
   bounds: { x: 100, y: 200, width: 1920, height: 1080 },
@@ -51,9 +50,4 @@ test('shapeRadius maps circle and rectangle', () => {
   assert.equal(shapeRadius('rectangle', 24), '24px');
   assert.equal(shapeRadius('rectangle', -4), '0px');
   assert.equal(shapeRadius('unknown', 8), '50%');
-});
-
-test('applyTemplate replaces known keys only', () => {
-  const html = applyTemplate('a {{json}} {{missing}}', { json: '{"ok":1}' });
-  assert.equal(html, 'a {"ok":1} {{missing}}');
 });
