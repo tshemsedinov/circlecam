@@ -26,7 +26,8 @@ Settings are in `config.json` next to `circlecam.js`.
 - `opacity` — overlay opacity from `0` to `1` (default: `1`)
 - `margin` — screen-border margin in pixels (default: `15`)
 - `monitor` — monitor index; primary is `0` (default: `0`)
-- `minFps` — prefer max resolution at >= this FPS (default: `30`)
+- `minFps` — require at least this FPS when the camera supports it;
+  `auto` prefers cameras that reach it (default: `30`)
 - `mirror` — `true` to flip the preview (default: `false`)
 - `nativeWayland` — `true` to skip the XWayland workaround
   (default: `false`)
@@ -55,6 +56,9 @@ Hardware GL often crashes on Linux XWayland. Turning GL off entirely
 uses a software bitmap presenter that cannot paint transparency, so the
 overlay would stay invisible. CircleCam uses SwiftShader (ANGLE)
 instead.
+
+The camera is opened at the window's pixel size (times the display
+scale), not its largest mode, to keep per-frame CPU use low.
 
 Linux waits briefly after Electron is ready so the first transparent
 frameless window gets an ARGB visual.

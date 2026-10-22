@@ -3,17 +3,12 @@
 
 const path = require('node:path');
 
+const { fail } = require('./lib/cli.js');
 const desktop = require('./lib/desktop.js');
 const { installDesktop, resolveDataHome, refreshDesktop } = desktop;
 
 const ROOT = __dirname;
 const ICON_SOURCE = path.join(ROOT, 'assets', 'circlecam.svg');
-
-const fail = (error) => {
-  const message = error.message ?? `${error}`;
-  console.error(`ERROR: ${message}`);
-  process.exit(1);
-};
 
 const dataHome = resolveDataHome(process.env);
 if (!dataHome.ok) fail(dataHome.error);

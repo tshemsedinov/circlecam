@@ -2,14 +2,13 @@
   "camera": "auto",
   "position": "top-right",
   "shape": "rectangle",
-  "width": 800,
-  "height": 800,
+  "width": 900,
+  "height": 900,
   "radius": 50,
   "opacity": 1,
-  "comments": "240, 480",
-  "margin": 15,
+  "margin": 0,
   "monitor": 0,
-  "minFps": 60,
+  "minFps": 30,
   "mirror": false,
   "nativeWayland": false
 }

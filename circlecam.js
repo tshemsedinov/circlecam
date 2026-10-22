@@ -1,28 +1,26 @@
 #!/usr/bin/env node
 'use strict';
 
-const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { Result } = require('metautil');
 
+const { fail } = require('./lib/cli.js');
 const { loadConfig } = require('./lib/config.js');
 const layout = require('./lib/layout.js');
-const { applyTemplate, calculatePosition, shapeRadius } = layout;
-const { clampOpacity } = layout;
+const { calculatePosition, shapeRadius, clampOpacity } = layout;
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const RENDERER_PATH = path.join(__dirname, 'renderer.html');
 
 const LINUX_READY_MS = 300; // first frameless window needs an ARGB visual
-const REVEAL_MS = 400;
-const PLACE_MS = 150;
+const REVEAL_MS = 400; // fallback when ready-to-show never fires
 
 const GL_SWITCHES = [
-  { name: 'enable-transparent-visuals', value: null },
-  { name: 'use-gl', value: 'angle' },
-  { name: 'use-angle', value: 'swiftshader' },
+  ['enable-transparent-visuals'],
+  ['use-gl', 'angle'],
+  ['use-angle', 'swiftshader'],
 ];
 
 process.on('uncaughtException', (error) => {
@@ -33,12 +31,6 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
 });
-
-const fail = (error) => {
-  const message = error.message ?? `${error}`;
-  console.error(`ERROR: ${message}`);
-  process.exit(1);
-};
 
 const readEnv = (name) => process.env[name] ?? '';
 
@@ -54,11 +46,7 @@ if (!loaded.ok) fail(loaded.error);
 const config = loaded.value;
 
 const electronFlags = (nativeWayland) => {
-  const flags = [];
-  for (const item of GL_SWITCHES) {
-    if (item.value === null) flags.push(`--${item.name}`);
-    else flags.push(`--${item.name}=${item.value}`);
-  }
+  const flags = GL_SWITCHES.map((item) => `--${item.join('=')}`);
   if (shouldForceX11(nativeWayland)) flags.push('--ozone-platform=x11');
   flags.push(__filename);
   return flags;
@@ -80,17 +68,13 @@ const spawnElectronGui = (nativeWayland) => {
   const flags = electronFlags(nativeWayland);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const stdio = 'inherit';
-  const options = { stdio, env };
-  const result = spawnSync(electronPath, flags, options);
+  const result = spawnSync(electronPath, flags, { stdio: 'inherit', env });
   if (result.error !== undefined) {
     console.error(result.error.message);
     process.exit(1);
   }
-  const status = result.status;
-  if (status !== null && status !== undefined) process.exit(status);
-  if (result.signal !== null && result.signal !== undefined) process.exit(1);
-  process.exit(0);
+  const signalCode = result.signal === null ? 0 : 1;
+  process.exit(result.status ?? signalCode);
 };
 
 const electronVersion = process.versions.electron ?? '';
@@ -100,33 +84,28 @@ if (isGui === false) spawnElectronGui(config.nativeWayland);
 
 const electron = require('electron');
 const { app, BrowserWindow, screen, session } = electron;
-const { resolveCameraDevice, openBestCameraMode } = require('./lib/camera.js');
+const { resolveCameraQuery } = require('./lib/camera.js');
 
 if (shouldForceX11(config.nativeWayland)) {
   app.commandLine.appendSwitch('ozone-platform', 'x11');
 }
 
 if (process.platform === 'linux') {
-  for (const item of GL_SWITCHES) {
-    if (item.value === null) app.commandLine.appendSwitch(item.name);
-    else app.commandLine.appendSwitch(item.name, item.value);
-  }
+  for (const item of GL_SWITCHES) app.commandLine.appendSwitch(...item);
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-const rendererLoaded = Result.from(() =>
-  fs.readFileSync(RENDERER_PATH, 'utf8'),
-);
-if (!rendererLoaded.ok) fail(rendererLoaded.error);
-const RENDERER_HTML = rendererLoaded.value;
+const resolved = Result.from(() => resolveCameraQuery(config.camera));
+if (!resolved.ok) fail(resolved.error);
 
-const selected = Result.from(() => {
-  const device = resolveCameraDevice(config.camera, config.minFps);
-  return openBestCameraMode(device, config.minFps);
-});
-if (!selected.ok) fail(selected.error);
-const selectedMode = selected.value;
+const view = {
+  camera: resolved.value,
+  minFps: config.minFps,
+  radius: shapeRadius(config.shape, config.radius),
+  opacity: clampOpacity(config.opacity),
+  mirror: config.mirror,
+};
 
 const orderedDisplays = () => {
   const primary = screen.getPrimaryDisplay();
@@ -137,12 +116,11 @@ const orderedDisplays = () => {
 
 const pickDisplay = (displays) => {
   const monitor = config.monitor;
-  const display = displays[monitor] ?? displays[0];
-  if (displays[monitor] === undefined) {
-    const missing = `WARNING: monitor ${monitor} does not exist`;
-    console.warn(`${missing}; using monitor 0.`);
-  }
-  return display;
+  const display = displays[monitor];
+  if (display !== undefined) return display;
+  const missing = `WARNING: monitor ${monitor} does not exist`;
+  console.warn(`${missing}; using monitor 0.`);
+  return displays[0];
 };
 
 const logSession = (displays) => {
@@ -156,8 +134,7 @@ const logSession = (displays) => {
   for (let index = 0; index < displays.length; index += 1) {
     const item = displays[index];
     const bounds = item.bounds;
-    let label = item.label;
-    if (label === undefined || label === '') label = item.id;
+    const label = item.label || item.id;
     const size = `${bounds.width}x${bounds.height}`;
     const at = `(${bounds.x}, ${bounds.y})`;
     console.log(`  ${index}: ${label} ${size} at ${at}`);
@@ -191,15 +168,11 @@ const buildWindow = (pos) => {
     show: false,
     webPreferences,
   });
-  win.setAlwaysOnTop(true);
   return win;
 };
 
-const onConsoleMessage = (...args) => {
-  const second = args[1];
-  const isRecord = typeof second === 'object' && second !== null;
-  const fromObject = isRecord && 'message' in second;
-  const message = fromObject ? second.message : args[2];
+const onConsoleMessage = (event) => {
+  const message = event.message;
   if (message === undefined || message === '') return;
   const text = `${message}`;
   if (text.includes('Electron Security Warning')) return;
@@ -218,8 +191,7 @@ const configureMediaPermissions = () => {
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
       if (permission !== 'media') return void callback(false);
-      const types = details?.mediaTypes;
-      const mediaTypes = types === undefined ? [] : types;
+      const mediaTypes = details?.mediaTypes ?? [];
       const allow = mediaTypes.length === 0 || mediaTypes.includes('video');
       callback(allow);
     },
@@ -227,10 +199,8 @@ const configureMediaPermissions = () => {
 };
 
 class Overlay {
-  constructor(mode) {
-    this.mode = mode;
+  constructor() {
     this.win = null;
-    this.rendererFile = null;
     this.revealed = false;
   }
 
@@ -254,89 +224,44 @@ class Overlay {
     console.log(`Requested position: ${position} (${pos.x}, ${pos.y})`);
     this.win = buildWindow(pos);
     this.bindWindow();
-    this.loadRenderer();
+    const query = { config: JSON.stringify(view) };
+    this.win.loadFile(RENDERER_PATH, { query });
     this.scheduleReveal(pos);
   }
 
   bindWindow() {
     const win = this.win;
-    win.webContents.on('before-input-event', (event, input) => {
-      this.onBeforeInput(event, input);
+    win.webContents.on('before-input-event', (_event, input) => {
+      this.onBeforeInput(input);
     });
     win.webContents.on('console-message', onConsoleMessage);
     win.on('closed', () => {
       this.win = null;
-      this.unlinkRenderer();
       app.quit();
     });
   }
 
-  loadRenderer() {
-    const userData = app.getPath('userData');
-    const rendererFile = path.join(userData, 'circlecam-renderer.html');
-    this.rendererFile = rendererFile;
-    const payload = { ...config, preferred: this.mode };
-    const json = JSON.stringify(payload).replaceAll('<', '\\u003c');
-    const mirrored = config.mirror === true;
-    const mirrorCss = mirrored ? 'transform: scaleX(-1);' : '';
-    const radiusCss = shapeRadius(config.shape, config.radius);
-    const opacityCss = clampOpacity(config.opacity);
-    const html = applyTemplate(RENDERER_HTML, {
-      json,
-      mirrorCss,
-      radiusCss,
-      opacityCss,
-    });
-    const written = Result.from(() => {
-      fs.writeFileSync(rendererFile, html, 'utf8');
-    });
-    if (!written.ok) fail(written.error);
-    this.win.loadFile(rendererFile);
-  }
-
-  unlinkRenderer() {
-    const rendererFile = this.rendererFile;
-    if (rendererFile === null) return;
-    this.rendererFile = null;
-    const removed = Result.from(() => fs.unlinkSync(rendererFile));
-    if (removed.ok) return;
-    if (removed.error.code === 'ENOENT') return;
-    console.error(removed.error.message);
-  }
-
   scheduleReveal(pos) {
     const reveal = () => this.reveal(pos);
-    const win = this.win;
-    win.once('ready-to-show', reveal);
-    win.webContents.once('did-finish-load', reveal);
+    this.win.once('ready-to-show', reveal);
     setTimeout(reveal, REVEAL_MS);
-    setTimeout(() => this.placeWindow(pos), PLACE_MS);
   }
 
   reveal(pos) {
     const win = this.win;
-    if (win === null || win.isDestroyed()) return;
-    this.placeWindow(pos);
-    if (win.isVisible() === false) win.show();
-    win.setAlwaysOnTop(true);
-    if (this.revealed) return;
+    if (this.revealed || win === null || win.isDestroyed()) return;
     this.revealed = true;
-    const visible = win.isVisible();
-    const bounds = JSON.stringify(win.getBounds());
-    console.log(`Window shown: visible=${visible} bounds=${bounds}`);
-  }
-
-  placeWindow(pos) {
-    const target = this.win;
-    if (target === null || target === undefined) return;
-    if (target.isDestroyed()) return;
+    win.show();
+    // window managers place a window when it is first mapped
     const { x, y } = pos;
     const { width, height } = config;
-    target.setBounds({ x, y, width, height });
-    target.setAlwaysOnTop(true);
+    win.setBounds({ x, y, width, height });
+    win.setAlwaysOnTop(true);
+    const bounds = JSON.stringify(win.getBounds());
+    console.log(`Window shown: bounds=${bounds}`);
   }
 
-  onBeforeInput(_event, input) {
+  onBeforeInput(input) {
     if (input.type !== 'keyDown') return;
     const key = input.key.toLowerCase();
     const altF4 = input.alt === true && key === 'f4';
@@ -346,5 +271,5 @@ class Overlay {
   }
 }
 
-const overlay = new Overlay(selectedMode);
+const overlay = new Overlay();
 overlay.start();

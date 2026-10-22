@@ -20,10 +20,9 @@
         position: relative;
         width: 100%;
         height: 100%;
-        border-radius: {{radiusCss}};
+        border-radius: 50%;
         overflow: hidden;
         background: rgba(15, 15, 15, 0.95);
-        opacity: {{opacityCss}};
         app-region: drag;
         -webkit-app-region: drag;
       }
@@ -36,7 +35,10 @@
         object-fit: cover;
         pointer-events: none;
         background: black;
-        {{mirrorCss}}
+      }
+
+      video.mirrored {
+        transform: scaleX(-1);
       }
 
       #status {
@@ -70,16 +72,18 @@
     <script>
       'use strict';
 
-      const CONFIG = {{json}};
+      const query = new URLSearchParams(location.search);
+      const CONFIG = JSON.parse(query.get('config'));
+      const frame = document.getElementById('frame');
       const video = document.getElementById('video');
       const status = document.getElementById('status');
       let activeStream = null;
 
-      const asText = (value) => {
-        if (value === undefined || value === null) return '';
-        if (typeof value === 'string') return value;
-        return `${value}`;
-      };
+      frame.style.borderRadius = CONFIG.radius;
+      frame.style.opacity = CONFIG.opacity;
+      video.classList.toggle('mirrored', CONFIG.mirror);
+
+      const asText = (value) => `${value ?? ''}`;
 
       const showStatus = (text) => {
         status.textContent = text;
@@ -96,60 +100,73 @@
       };
 
       const normalizeName = (value) => {
-        const text = asText(value).toLowerCase();
+        const text = value.toLowerCase();
         const spaced = text.replace(/[_:/]+/g, ' ');
         return spaced.replace(/\s+/g, ' ').trim();
       };
 
-      const tokensOf = (value) => {
-        const parts = normalizeName(value).split(' ');
-        return parts.filter((token) => token !== '');
+      const listCameras = async () => {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.filter((device) => device.kind === 'videoinput');
       };
 
-      const nameScore = (label, target) => {
-        const a = tokensOf(label);
-        const b = tokensOf(target);
-        if (a.length === 0 || b.length === 0) return 0;
-        let hits = 0;
-        for (const token of a) {
-          if (b.includes(token)) hits += 1;
+      // labels and capabilities stay hidden until access is granted once
+      const grantedCameras = async () => {
+        const cameras = await listCameras();
+        if (cameras.some((camera) => camera.label !== '')) return cameras;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true,
+        });
+        stopStream(stream);
+        return listCameras();
+      };
+
+      const capabilitiesOf = (camera) => camera.getCapabilities?.() ?? {};
+
+      const maxFps = (camera) => capabilitiesOf(camera).frameRate?.max ?? 0;
+
+      const maxPixels = (camera) => {
+        const { width, height } = capabilitiesOf(camera);
+        return (width?.max ?? 0) * (height?.max ?? 0);
+      };
+
+      const isFast = (camera) => maxFps(camera) >= CONFIG.minFps;
+
+      const compareCameras = (a, b) => {
+        const fast = Number(isFast(b)) - Number(isFast(a));
+        if (fast !== 0) return fast;
+        return maxPixels(b) - maxPixels(a);
+      };
+
+      const candidateCameras = (cameras) => {
+        if (CONFIG.camera === null) return cameras.toSorted(compareCameras);
+        const needle = normalizeName(CONFIG.camera);
+        const matches = cameras.filter((camera) => {
+          const name = normalizeName(camera.label);
+          return name.includes(needle);
+        });
+        if (matches.length === 0) {
+          throw new Error(`No camera matches "${CONFIG.camera}"`);
         }
-        return hits;
+        return matches;
       };
 
-      const pickCamera = (cameras, preferred) => {
-        if (cameras.length === 0) return null;
-        if (preferred === null || preferred === undefined) return cameras[0];
-        const exactId = cameras.find((d) => d.deviceId === preferred.deviceId);
-        if (exactId !== undefined) return exactId;
-        let best = null;
-        let bestHits = 0;
-        for (const camera of cameras) {
-          const hits = nameScore(camera.label, preferred.name);
-          if (hits > bestHits) {
-            best = camera;
-            bestHits = hits;
-          }
-        }
-        if (bestHits > 0) return best;
-        return cameras[0];
-      };
-
-      const openCamera = async (device, preferred) => {
-        const pref = preferred ?? {};
-        const width = pref.width ?? 1920;
-        const height = pref.height ?? 1080;
-        const fps = pref.fps > 0 ? pref.fps : 30;
-        const deviceId = device ? { exact: device.deviceId } : undefined;
-        const constraints = {
-          deviceId,
-          width: { ideal: width },
-          height: { ideal: height },
-          frameRate: { ideal: fps },
+      const constraintsFor = (camera) => {
+        const scale = window.devicePixelRatio;
+        const frameRate = { ideal: CONFIG.minFps };
+        if (isFast(camera)) frameRate.min = CONFIG.minFps;
+        return {
+          deviceId: { exact: camera.deviceId },
+          // only the pixels the window shows; larger frames cost CPU
+          width: { ideal: Math.round(window.innerWidth * scale) },
+          height: { ideal: Math.round(window.innerHeight * scale) },
+          frameRate,
         };
-        if (pref.fps >= CONFIG.minFps) {
-          constraints.frameRate.min = CONFIG.minFps;
-        }
+      };
+
+      const openCamera = async (camera) => {
+        const constraints = constraintsFor(camera);
         try {
           return await navigator.mediaDevices.getUserMedia({
             audio: false,
@@ -157,11 +174,9 @@
           });
         } catch (error) {
           console.error(error);
-          let videoOpt = true;
-          if (device) videoOpt = { deviceId: { exact: device.deviceId } };
           return await navigator.mediaDevices.getUserMedia({
             audio: false,
-            video: videoOpt,
+            video: { deviceId: constraints.deviceId },
           });
         }
       };
@@ -170,35 +185,34 @@
         console.log('Cameras:');
         for (let index = 0; index < cameras.length; index += 1) {
           const camera = cameras[index];
-          let label = camera.label;
-          if (label === undefined || label === '') label = camera.deviceId;
+          const label = camera.label || camera.deviceId;
           console.log(`  [${index}] ${label}`);
         }
       };
 
-      const applyPreferred = async (track, preferred) => {
-        const idealFps = preferred.fps > 0 ? preferred.fps : 30;
-        try {
-          await track.applyConstraints({
-            width: { ideal: preferred.width },
-            height: { ideal: preferred.height },
-            frameRate: { ideal: idealFps },
-          });
-        } catch (error) {
-          // optional; the opened stream still works
-          console.error(error);
-        }
+      const logSelected = (camera, stream) => {
+        const track = stream.getVideoTracks()[0];
+        const actual = track.getSettings();
+        const title = camera.label || track.label;
+        const fps = (actual.frameRate ?? 0).toFixed(1);
+        const summary = `${title} | ${actual.width}x${actual.height} @ ${fps}`;
+        console.log(`Selected: ${summary} FPS`);
       };
 
-      const logSelected = (device, track, preferred) => {
-        const actual = track.getSettings();
-        const title = device?.label || track.label;
-        const aw = actual.width ?? preferred.width;
-        const ah = actual.height ?? preferred.height;
-        const rate = actual.frameRate ?? preferred.fps ?? 0;
-        const fps = rate.toFixed(1);
-        const summary = `${title} | ${aw}x${ah} @ ${fps}`;
-        console.log(`Selected: ${summary} FPS`);
+      const openFirst = async (candidates) => {
+        let failure = null;
+        for (const camera of candidates) {
+          showStatus(`Opening ${camera.label || 'camera'}…`);
+          try {
+            const stream = await openCamera(camera);
+            logSelected(camera, stream);
+            return stream;
+          } catch (error) {
+            console.error(error);
+            failure = error;
+          }
+        }
+        throw failure;
       };
 
       const start = async () => {
@@ -207,27 +221,12 @@
             throw new Error('getUserMedia is not available');
           }
           showStatus('Requesting camera access…');
-          const permissionStream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: true,
-          });
-          stopStream(permissionStream);
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const cameras = devices.filter((d) => d.kind === 'videoinput');
+          const cameras = await grantedCameras();
           if (cameras.length === 0) {
             throw new Error('No video-input cameras found');
           }
           logCameras(cameras);
-          const device = pickCamera(cameras, CONFIG.preferred);
-          const opening = device?.label || 'camera';
-          showStatus(`Opening ${opening}…`);
-          activeStream = await openCamera(device, CONFIG.preferred);
-          const track = activeStream.getVideoTracks()[0];
-          const preferred = CONFIG.preferred;
-          if (track && preferred) {
-            await applyPreferred(track, preferred);
-            logSelected(device, track, preferred);
-          }
+          activeStream = await openFirst(candidateCameras(cameras));
           video.srcObject = activeStream;
           await video.play();
           hideStatus();
@@ -237,10 +236,6 @@
           showStatus(`Camera error:\n${message}`);
         }
       };
-
-      window.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') window.close();
-      });
 
       window.addEventListener('beforeunload', () => {
         stopStream(activeStream);
